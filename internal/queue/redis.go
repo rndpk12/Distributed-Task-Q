@@ -15,7 +15,7 @@ var (
 
 func Connect() {
 
-	addr := os.Getenv("neocozy-mass-groomed-72035.db.redis.io:12997")
+	addr := os.Getenv("REDIS_ADDR")
 
 	if addr == "" {
 		addr = "localhost:6379"
@@ -23,8 +23,8 @@ func Connect() {
 
 	RDB = redis.NewClient(&redis.Options{
 		Addr:     addr,
-		Username: os.Getenv("default"),
-		Password: os.Getenv("sxdAvMNm3ioaomJ266rm1lPyHqEljGVA"),
+		Username: os.Getenv("REDIS_USERNAME"),
+		Password: os.Getenv("REDIS_PASSWORD"),
 	})
 
 	_, err := RDB.Ping(Ctx).Result()
