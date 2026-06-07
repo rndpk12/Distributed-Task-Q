@@ -27,6 +27,23 @@ func Start() {
 		LastSeen:       time.Now(),
 	})
 
+	// Heartbeat goroutine (RUN ONCE)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+
+			log.Printf("Heartbeat: %s", workerID)
+
+			db.DB.Model(&models.Worker{}).
+				Where("id = ?", workerID).
+				Updates(map[string]interface{}{
+					"last_seen": time.Now(),
+					"status":    "active",
+				})
+		}
+	}()
 	for {
 
 		taskID, err := queue.RDB.BRPop(
@@ -54,11 +71,10 @@ func Start() {
 
 		db.DB.Model(&models.Worker{}).
 			Where("id = ?", workerID).
-			Updates(map[string]interface{}{
-				"last_seen": time.Now(),
-			})
+			Update("last_seen", time.Now())
 
 		log.Printf("[%s] Processing task %s\n", workerID, task.ID)
+
 		queue.PublishEvent(queue.Event{
 			Type:    "TASK_PROCESSING",
 			Message: task.ID,
@@ -85,6 +101,7 @@ func Start() {
 		if processErr != nil {
 
 			task.Retries++
+
 			metrics.IncrementRetried()
 
 			queue.RDB.Incr(
@@ -131,6 +148,7 @@ func Start() {
 				workerID,
 				task.ID,
 			)
+
 			queue.PublishEvent(queue.Event{
 				Type:    "TASK_FAILED",
 				Message: task.ID,
@@ -144,18 +162,11 @@ func Start() {
 
 			metrics.IncrementFailed()
 
-			queue.RDB.LPush(
-				queue.Ctx,
-				"tasks:dlq",
-				task.ID,
-			)
-
-			metrics.IncrementFailed()
-
 			queue.RDB.Incr(
 				queue.Ctx,
 				"metrics:failed",
 			)
+
 			task.Status = "failed"
 
 			db.DB.Save(&task)
@@ -165,13 +176,13 @@ func Start() {
 
 		metrics.IncrementProcessed()
 
-		metrics.IncrementProcessed()
-
 		queue.RDB.Incr(
 			queue.Ctx,
 			"metrics:processed",
 		)
+
 		task.Status = "completed"
+
 		db.DB.Save(&task)
 
 		db.DB.Model(&models.Worker{}).
@@ -181,7 +192,12 @@ func Start() {
 				gorm.Expr("tasks_processed + ?", 1),
 			)
 
-		log.Printf("[%s] Completed task %s\n", workerID, task.ID)
+		log.Printf(
+			"[%s] Completed task %s\n",
+			workerID,
+			task.ID,
+		)
+
 		queue.PublishEvent(queue.Event{
 			Type:    "TASK_COMPLETED",
 			Message: task.ID,

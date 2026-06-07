@@ -1,0 +1,50 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: dtq-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: taskqueue
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: dtq-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dtq-api
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8081:8081"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/taskqueue?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dtq-worker
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/taskqueue?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+volumes:
+  postgres_data:

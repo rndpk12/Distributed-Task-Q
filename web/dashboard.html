@@ -853,7 +853,7 @@ body::before {
     <div class="sidebar-bottom">
       <div class="connection-info">
         <div style="color:var(--text2);margin-bottom:4px;font-size:11px;">Connection</div>
-        <div>WS: <span style="color:var(--green);">ws://localhost:8080</span></div>
+        <div>WS: <span style="color:var(--green);">ws://localhost:8081</span></div>
         <div>Redis: <span style="color:var(--green);">:6379</span></div>
         <div>PG: <span style="color:var(--green);">:5432</span></div>
         <div style="margin-top:6px;">v1.0.0 · Go 1.22</div>
@@ -1194,7 +1194,12 @@ body::before {
   </main>
 </div>
 
+
 <script>
+// ─── CONFIG ──────────────────────────────────────────────────────────
+const API_BASE = 'http://localhost:8081';
+const WS_URL   = 'ws://localhost:8081/ws';
+
 // ─── STATE ───────────────────────────────────────────────────────────
 const state = {
   processed: 0,
@@ -1205,90 +1210,160 @@ const state = {
   startTime: Date.now(),
   taskFilter: 'all',
   throughputHistory: Array(30).fill(0),
-  tasksPrevMin: 0,
-  lastMinProcessed: 0,
+  prevProcessed: 0,
+  wsConnected: false,
 };
 
-const TASK_TYPES = ['email.send','image.resize','pdf.generate','data.sync','notification.push','report.generate','webhook.deliver'];
-const WORKER_IDS = ['worker-a1b2','worker-c3d4','worker-e5f6','worker-g7h8','worker-i9j0','worker-k1l2'];
-const STATUS_COLORS = {
-  pending: 'var(--blue)', processing: 'var(--amber)',
-  completed: 'var(--green)', failed: 'var(--red)',
-  retried: 'var(--purple)', dlq: 'var(--red)'
-};
-
-// Tasks DB
-let tasks = [];
-let dlqTasks = [];
+let tasks   = [];
 let workers = [];
-let events = [];
+let dlqTasks = [];
+let events  = [];
 
-function uid() {
-  return 'task-' + Math.random().toString(36).slice(2,10);
-}
-
+// ─── HELPERS ──────────────────────────────────────────────────────────
 function timeAgo(ts) {
-  const s = Math.floor((Date.now()-ts)/1000);
-  if(s<5) return 'just now';
-  if(s<60) return s+'s ago';
-  if(s<3600) return Math.floor(s/60)+'m ago';
-  return Math.floor(s/3600)+'h ago';
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 5)    return 'just now';
+  if (s < 60)   return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
 }
 
 function fmtTime(ts) {
-  return new Date(ts).toLocaleTimeString('en-US',{hour12:false});
+  return new Date(ts).toLocaleTimeString('en-US', { hour12: false });
 }
 
 function fmtDateTime(ts) {
-  return new Date(ts).toLocaleString('en-US',{hour12:false,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return new Date(ts).toLocaleString('en-US', {
+    hour12: false, month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────────
-async function loadWorkers() {
+// Map backend event type strings → display types
+const EVENT_TYPE_MAP = {
+  TASK_CREATED:    'created',
+  TASK_PROCESSING: 'processing',
+  TASK_COMPLETED:  'completed',
+  TASK_FAILED:     'failed',
+  TASK_RETRIED:    'retried',
+  TASK_DLQ:        'dlq',
+};
 
-    const response = await fetch("/workers");
+// ─── WEBSOCKET ────────────────────────────────────────────────────────
+function connectWS() {
+  let ws;
+  try { ws = new WebSocket(WS_URL); } catch(e) { scheduleWSReconnect(); return; }
 
-    const data = await response.json();
+  ws.onopen = () => {
+    state.wsConnected = true;
+    setSystemStatus('operational');
+  };
 
-    workers = data.map(worker => ({
-        id: worker.ID,
-        status: worker.Status,
-        processed: worker.TasksProcessed,
-        lastSeen: new Date(worker.LastSeen).getTime()
-    }));
+  ws.onmessage = (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      const displayType = EVENT_TYPE_MAP[ev.type] || 'created';
+      const label = ev.type.replace('TASK_', '').toLowerCase();
+      addEvent(displayType, ev.message, label + ': ' + ev.message.slice(0, 12));
+    } catch(_) {}
+  };
 
-    renderWorkers();
+  ws.onclose = () => {
+    state.wsConnected = false;
+    setSystemStatus('degraded');
+    scheduleWSReconnect();
+  };
+
+  ws.onerror = () => {
+    state.wsConnected = false;
+    setSystemStatus('degraded');
+  };
 }
 
-function initTasks() {
-  const statuses = ['completed','completed','completed','failed','processing','pending'];
-  tasks = Array.from({length:25}, (_,i) => ({
-    id: uid(),
-    type: TASK_TYPES[i % TASK_TYPES.length],
-    status: statuses[i % statuses.length],
-    retries: Math.floor(Math.random()*3),
-    worker: WORKER_IDS[i % 4],
-    created: Date.now() - (25-i)*18000 - Math.random()*5000,
-    updated: Date.now() - Math.random()*3000,
-    payload: '{"data":"sample"}',
-  }));
-
-  dlqTasks = Array.from({length:4}, (_,i) => ({
-    id: uid(),
-    type: TASK_TYPES[i % TASK_TYPES.length],
-    retries: 3+i,
-    created: Date.now() - (4-i)*3600000,
-    reason: ['Connection timeout','Out of memory','Invalid payload','Rate limit exceeded'][i],
-  }));
+function scheduleWSReconnect() {
+  setTimeout(connectWS, 4000);
 }
 
-function initStats() {
-  state.processed = Math.floor(Math.random()*800)+200;
-  state.failed = Math.floor(state.processed * 0.04);
-  state.retried = Math.floor(state.processed * 0.08);
-  state.queued = Math.floor(Math.random()*20)+5;
-  state.activeWorkers = 3;
-  state.throughputHistory = Array.from({length:30}, () => Math.floor(Math.random()*30)+5);
+function setSystemStatus(s) {
+  const pill = document.getElementById('systemStatusPill');
+  const dot  = document.getElementById('statusDot');
+  const txt  = document.getElementById('statusText');
+  if (s === 'operational') {
+    pill.className = 'status-pill operational';
+    dot.className  = 'dot green';
+    txt.textContent = 'Operational';
+  } else {
+    pill.className = 'status-pill degraded';
+    dot.className  = 'dot amber';
+    txt.textContent = 'Disconnected';
+  }
+}
+
+// ─── API FETCHERS ─────────────────────────────────────────────────────
+async function fetchMetrics() {
+  try {
+    const r = await fetch(API_BASE + '/metrics');
+    if (!r.ok) return;
+    const d = await r.json();
+    const prev = state.processed;
+    state.processed = parseInt(d.processed) || 0;
+    state.failed    = parseInt(d.failed)    || 0;
+    state.retried   = parseInt(d.retried)   || 0;
+    state.queued    = parseInt(d.queue)     || 0;
+    // track per-poll delta for throughput sparkline
+    const delta = state.processed - prev;
+    if (delta >= 0) {
+      state.throughputHistory.push(delta);
+      state.throughputHistory.shift();
+    }
+  } catch(_) {}
+}
+
+async function fetchWorkers() {
+  try {
+    const r = await fetch(API_BASE + '/workers');
+
+    if (!r.ok) return;
+
+    const data = await r.json();
+    console.log("RAW API DATA:", data);
+
+    workers = data.map(w => ({
+  id: w.id,
+  status: w.status,
+  tasks_processed: w.tasks_processed,
+  currentTask: null,
+  successRate: 100,
+  lastHeartbeat: w.last_seen
+}));
+
+    state.activeWorkers =
+      workers.filter(w => w.status === 'active').length;
+
+  } catch (err) {
+    console.error("workers fetch error", err);
+  }
+}
+
+async function fetchTasks() {
+  try {
+    const r = await fetch(API_BASE + '/tasks');
+    if (!r.ok) return;
+    tasks = await r.json();
+  } catch(_) {}
+}
+
+async function fetchDLQ() {
+  try {
+    const r = await fetch(API_BASE + '/dlq');
+    if (!r.ok) return;
+    dlqTasks = await r.json();
+  } catch(_) {}
+}
+
+async function refreshAll() {
+  await Promise.all([fetchMetrics(), fetchWorkers(), fetchTasks(), fetchDLQ()]);
+  renderAll();
 }
 
 // ─── RENDER ───────────────────────────────────────────────────────────
@@ -1304,143 +1379,161 @@ function renderAll() {
 }
 
 function renderHeader() {
-  document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-US',{hour12:false});
-  const upSecs = Math.floor((Date.now()-state.startTime)/1000);
-  const h = Math.floor(upSecs/3600), m = Math.floor((upSecs%3600)/60), s = upSecs%60;
-  document.getElementById('hdrUptime').textContent = `${h}h ${m}m ${s}s`;
-  document.getElementById('hdrWorkers').textContent = workers.filter(w=>w.status!=='dead').length;
-  const tpm = state.throughputHistory[state.throughputHistory.length-1];
-  document.getElementById('hdrThroughput').textContent = tpm+'/min';
+  document.getElementById('headerTime').textContent =
+    new Date().toLocaleTimeString('en-US', { hour12: false });
+  const upSecs = Math.floor((Date.now() - state.startTime) / 1000);
+  const h = Math.floor(upSecs / 3600);
+  const m = Math.floor((upSecs % 3600) / 60);
+  const s = upSecs % 60;
+  document.getElementById('hdrUptime').textContent  = `${h}h ${m}m ${s}s`;
+  document.getElementById('hdrWorkers').textContent = workers.filter(w => w.status !== 'offline').length;
+  const tpm = state.throughputHistory[state.throughputHistory.length - 1] || 0;
+  document.getElementById('hdrThroughput').textContent = tpm + '/poll';
 }
 
 function renderMetrics() {
   document.getElementById('metProcessed').textContent = state.processed.toLocaleString();
-  document.getElementById('metFailed').textContent = state.failed.toLocaleString();
-  document.getElementById('metRetried').textContent = state.retried.toLocaleString();
-  document.getElementById('metQueued').textContent = state.queued.toLocaleString();
-  document.getElementById('metWorkers').textContent = state.activeWorkers;
-  const rate = state.processed > 0 ? ((state.failed/state.processed)*100).toFixed(1) : '0.0';
-  document.getElementById('metFailedDelta').textContent = rate+'% rate';
-  document.getElementById('metFailedDelta').className = 'metric-delta '+(parseFloat(rate)>5?'down':'');
-  const tpm = state.throughputHistory[state.throughputHistory.length-1];
-  document.getElementById('metProcessedDelta').textContent = '+'+tpm+' / min';
+  document.getElementById('metFailed').textContent    = state.failed.toLocaleString();
+  document.getElementById('metRetried').textContent   = state.retried.toLocaleString();
+  document.getElementById('metQueued').textContent    = state.queued.toLocaleString();
+  document.getElementById('metWorkers').textContent   = state.activeWorkers;
+
+  const rate = state.processed > 0
+    ? ((state.failed / state.processed) * 100).toFixed(1)
+    : '0.0';
+  document.getElementById('metFailedDelta').textContent  = rate + '% rate';
+  document.getElementById('metFailedDelta').className    = 'metric-delta ' + (parseFloat(rate) > 5 ? 'down' : '');
+  const tpm = state.throughputHistory[state.throughputHistory.length - 1] || 0;
+  document.getElementById('metProcessedDelta').textContent = '+' + tpm + ' / poll';
+
+  // total workers for subtitle
+  const totalEl = document.querySelector('.metric-card.workers .metric-delta');
+  if (totalEl) totalEl.textContent = 'of ' + workers.length + ' total';
 }
 
+
+
+
 function renderWorkers() {
-
-  const tbody = document.getElementById('workerTableBody');
-
-  tbody.innerHTML = workers.map(w => `
+console.log("Workers array:", workers);
+console.log("First worker:", workers[0]);
+console.log("Workers count:", workers.length);
+console.log("Active workers:",
+  workers.filter(w => w.status === "active")
+);
+  const rows = workers.map(w => `
     <tr>
-      <td>
-        <span class="worker-id">${w.id}</span>
-      </td>
-
-      <td>
-        <span class="status-badge ${w.status}">
-          ${w.status === 'active'
-            ? '<span class="dot green" style="width:5px;height:5px;flex-shrink:0;display:inline-block;border-radius:50%;background:var(--green);margin-right:2px;"></span>'
-            : ''
-          }
-          ${w.status}
-        </span>
-      </td>
-
-      <td style="color:var(--text3);font-size:10px;">
-        —
-      </td>
-
-      <td style="font-weight:600;">
-        ${w.processed.toLocaleString()}
-      </td>
+      <td><span class="worker-id">${w.id}</span></td>
+      <td><span class="status-badge ${w.status === 'active' ? 'active' : (w.status === 'offline' ? 'dead' : 'idle')}">
+        ${w.status === 'active' ? '<span style="width:5px;height:5px;flex-shrink:0;display:inline-block;border-radius:50%;background:var(--green);margin-right:2px;"></span>' : ''}
+        ${w.status}
+      </span></td>
+      <td style="font-weight:600;">${(w.processed || 0).toLocaleString()}</td>
+      <td style="color:var(--text3);font-size:10px;">${timeAgo(w.lastHeartbeat)}</td>
     </tr>
   `).join('');
 
+  console.log("Workers count:", workers.length);
+
+const activeWorkers = workers.filter(
+  w => w.status === "active"
+).length;
+
+console.log("Active workers:", activeWorkers);
+
+  const tbody = document.getElementById('workerTableBody');
+  if (tbody) tbody.innerHTML = rows || '<tr><td colspan="4" style="padding:20px;color:var(--text3);text-align:center;">No workers registered</td></tr>';
+
   const allTbody = document.getElementById('allWorkerTableBody');
+  if (allTbody) allTbody.innerHTML = workers.map(w => `
+    <tr>
+      <td><span class="worker-id">${w.id}</span></td>
+      <td><span class="status-badge ${w.status === 'active' ? 'active' : (w.status === 'offline' ? 'dead' : 'idle')}">${w.status}</span></td>
+      <td style="color:var(--cyan);font-size:10px;">—</td>
+      <td style="font-weight:600;">${(w.processed || 0).toLocaleString()}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="mini-bar" style="width:80px;height:4px;">
+            <div class="mini-bar-fill" style="background:var(--green);width:${w.status === 'offline' ? 0 : 95}%"></div>
+          </div>
+          <span style="font-size:11px;color:var(--green);">${w.status === 'offline' ? '—' : '95%+'}</span>
+        </div>
+      </td>
+      <td style="color:var(--text3);">${timeAgo(w.lastHeartbeat)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" style="padding:20px;color:var(--text3);text-align:center;">No workers registered</td></tr>';
 
-  if (allTbody) {
+  const c = workers.filter(w => w.status !== 'offline').length;
+  const el = document.getElementById('allWorkerCount');     if (el) el.textContent = c + ' workers';
+  const nb = document.getElementById('navWorkerCount');     if (nb) nb.textContent = c;
+  const pb = document.getElementById('workerPanelBadge');   if (pb) pb.textContent = c + ' nodes';
+  const hh = document.getElementById('hdrWorkers');         if (hh) hh.textContent = c;
+}
 
-    allTbody.innerHTML = workers.map(w => `
-      <tr>
+function renderQueueStats() {
+  const completed  = tasks.filter(t => t.status === 'completed').length;
+  const pending    = tasks.filter(t => t.status === 'pending').length;
+  const processing = tasks.filter(t => t.status === 'processing' || t.status === 'retrying').length;
+  const failed     = tasks.filter(t => t.status === 'failed').length;
+  const dlq        = dlqTasks.length;
 
-        <td>
-          <span class="worker-id">${w.id}</span>
-        </td>
+  document.getElementById('qPending').textContent    = state.queued || pending;
+  document.getElementById('qProcessing').textContent = processing;
+  document.getElementById('qCompleted').textContent  = state.processed;
+  document.getElementById('qFailed').textContent     = state.failed;
+  document.getElementById('qDLQ').textContent        = dlq;
 
-        <td>
-          <span class="status-badge ${w.status}">
-            ${w.status}
-          </span>
-        </td>
+  const totalVisible = Math.max(state.processed + state.failed + state.queued + processing + dlq, 1);
+  document.getElementById('qPendingBar').style.width    = Math.min(100, (state.queued / 50) * 100) + '%';
+  document.getElementById('qProcessingBar').style.width = Math.min(100, (processing / 6) * 100) + '%';
+  document.getElementById('qCompletedBar').style.width  = Math.min(100, (state.processed / Math.max(state.processed, 100)) * 100) + '%';
+  document.getElementById('qFailedBar').style.width     = Math.min(100, (state.failed / Math.max(state.processed, 1)) * 100 * 5) + '%';
+  document.getElementById('qDLQBar').style.width        = Math.min(100, (dlq / 10) * 100) + '%';
 
-        <td style="color:var(--text3);font-size:10px;">
-          —
-        </td>
-
-        <td style="font-weight:600;">
-          ${w.processed.toLocaleString()}
-        </td>
-
-        <td style="color:var(--green);">
-          Active
-        </td>
-
-        <td style="color:var(--text3);">
-          ${timeAgo(w.lastSeen)}
-        </td>
-
-      </tr>
-    `).join('');
-  }
-
-  const c = workers.filter(w => w.status !== 'dead').length;
-
-  document.getElementById('allWorkerCount').textContent =
-    c + ' workers';
-
-  document.getElementById('navWorkerCount').textContent =
-    c;
-
-  document.getElementById('workerPanelBadge').textContent =
-    c + ' nodes';
-
-  document.getElementById('hdrWorkers').textContent =
-    c;
+  const nd = document.getElementById('navDLQCount');   if (nd) nd.textContent = dlq;
+  const dc = document.getElementById('dlqCount');      if (dc) dc.textContent = dlq + ' items';
+  const nt = document.getElementById('navTaskCount');  if (nt) nt.textContent = tasks.length;
 }
 
 function renderTasks() {
-  const q = document.getElementById('taskSearch').value.toLowerCase();
+  const q = (document.getElementById('taskSearch').value || '').toLowerCase();
   const filtered = tasks.filter(t => {
-    if(state.taskFilter !== 'all' && t.status !== state.taskFilter) return false;
-    if(q && !t.id.includes(q) && !t.type.includes(q) && !t.status.includes(q)) return false;
+    if (state.taskFilter !== 'all' && t.status !== state.taskFilter) return false;
+    if (q && !t.id.includes(q) && !t.type.includes(q) && !t.status.includes(q)) return false;
     return true;
   });
 
-  document.getElementById('taskTableBody').innerHTML = filtered.map(t => `
-    <tr>
-      <td><span class="task-id">${t.id}</span></td>
-      <td><span class="task-type">${t.type}</span></td>
-      <td><span class="status-badge ${t.status}">${t.status}</span></td>
-      <td style="text-align:center;">${t.retries}</td>
-      <td style="color:var(--cyan);font-size:10px;">${t.worker}</td>
-      <td style="color:var(--text3);">${fmtDateTime(t.created)}</td>
-      <td style="color:var(--text3);">${timeAgo(t.updated)}</td>
-    </tr>
-  `).join('');
+  const tbody = document.getElementById('taskTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = filtered.length === 0
+    ? '<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--text3);">No tasks found</td></tr>'
+    : filtered.map(t => `
+      <tr>
+        <td><span class="task-id">${t.id.slice(0,12)}…</span></td>
+        <td><span class="task-type">${t.type || '—'}</span></td>
+        <td><span class="status-badge ${t.status}">${t.status}</span></td>
+        <td style="text-align:center;">${t.retries || 0}</td>
+        <td style="color:var(--cyan);font-size:10px;">—</td>
+        <td style="color:var(--text3);">${fmtDateTime(t.created_at || t.CreatedAt)}</td>
+        <td style="color:var(--text3);">${timeAgo(t.updated_at || t.UpdatedAt)}</td>
+      </tr>
+    `).join('');
 }
 
 function renderDLQ() {
-  document.getElementById('dlqList').innerHTML = dlqTasks.length === 0
+  const el = document.getElementById('dlqList');
+  if (!el) return;
+  el.innerHTML = dlqTasks.length === 0
     ? '<div style="padding:40px;text-align:center;color:var(--text3);">No failed tasks in dead letter queue</div>'
     : dlqTasks.map(t => `
       <div class="dlq-item">
         <div class="dlq-info">
-          <div class="dlq-id">${t.id}</div>
-          <div class="dlq-type">${t.type}</div>
-          <div class="dlq-meta">Reason: ${t.reason} · Added ${timeAgo(t.created)}</div>
+          <div class="dlq-id">${t.id.slice(0, 18)}…</div>
+          <div class="dlq-type">${t.type || '—'}</div>
+          <div class="dlq-meta">Failed · Added ${timeAgo(t.updated_at || t.UpdatedAt)}</div>
         </div>
         <div class="dlq-retries">
-          <div class="dlq-retry-count">${t.retries}</div>
+          <div class="dlq-retry-count">${t.retries || 0}</div>
           <div class="dlq-retry-label">retries</div>
         </div>
         <button class="btn-requeue" onclick="requeueTask('${t.id}')">↺ Requeue</button>
@@ -1451,106 +1544,117 @@ function renderDLQ() {
 function renderHealth() {
   const qm = document.getElementById('healthQueueMetrics');
   const wl = document.getElementById('healthWorkerLoad');
-  if(!qm || !wl) return;
+  if (!qm || !wl) return;
 
-  const qmetrics = [
-    {label:'Enqueue rate', value:state.throughputHistory[state.throughputHistory.length-1]+'/min', pct:60},
-    {label:'Queue depth', value:state.queued, pct: Math.min(100,state.queued/50*100)},
-    {label:'Avg wait time', value:'1.2s', pct:12},
-    {label:'DLQ fill', value:dlqTasks.length+'/100', pct:dlqTasks.length},
-  ];
+  const rate = state.processed > 0 ? ((state.failed / state.processed) * 100).toFixed(1) : '0.0';
 
-  qm.innerHTML = qmetrics.map(m => `
+  qm.innerHTML = [
+    { label: 'Queue depth',   value: state.queued,        pct: Math.min(100, (state.queued / 50) * 100) },
+    { label: 'Total processed', value: state.processed,   pct: Math.min(100, (state.processed / Math.max(state.processed, 100)) * 100) },
+    { label: 'Total failed',  value: state.failed,        pct: Math.min(100, parseFloat(rate) * 5) },
+    { label: 'Total retried', value: state.retried,       pct: Math.min(100, (state.retried / Math.max(state.processed, 1)) * 100) },
+    { label: 'DLQ fill',      value: dlqTasks.length + '/∞', pct: Math.min(100, dlqTasks.length * 10) },
+  ].map(m => `
     <div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
         <span style="font-size:11px;color:var(--text2);">${m.label}</span>
-        <span style="font-size:11px;color:var(--text1);font-weight:600;">${m.value}</span>
+        <span style="font-size:11px;color:var(--text1);font-weight:600;">${typeof m.value === 'number' ? m.value.toLocaleString() : m.value}</span>
       </div>
       <div class="mini-bar"><div class="mini-bar-fill" style="background:var(--blue);width:${m.pct}%"></div></div>
     </div>
   `).join('');
 
-  wl.innerHTML = workers.map(w => `
-    <div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-        <span style="font-size:11px;color:var(--cyan);">${w.id}</span>
-        <span class="status-badge ${w.status}" style="font-size:9px;padding:1px 6px;">${w.status}</span>
+  wl.innerHTML = workers.length === 0
+    ? '<div style="color:var(--text3);font-size:11px;">No workers connected</div>'
+    : workers.map(w => `
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:11px;color:var(--cyan);">${w.id}</span>
+          <span class="status-badge ${w.status === 'active' ? 'active' : (w.status === 'offline' ? 'dead' : 'idle')}" style="font-size:9px;padding:1px 6px;">${w.status}</span>
+        </div>
+        <div class="mini-bar"><div class="mini-bar-fill" style="background:var(--purple);width:${w.status === 'active' ? 70 : 5}%"></div></div>
       </div>
-      <div class="mini-bar"><div class="mini-bar-fill" style="background:var(--purple);width:${w.status==='active'?Math.floor(Math.random()*40)+40:5}%"></div></div>
-    </div>
-  `).join('');
+    `).join('');
+
+  // Update health panel service status counts
+  const hWorkers = document.getElementById('hWorkers');
+  const hWorkersMeta = document.getElementById('hWorkersMeta');
+  if (hWorkers) {
+    const online = workers.filter(w => w.status !== 'offline').length;
+    hWorkers.innerHTML = `<div class="dot ${online > 0 ? 'green' : 'red'}"></div> ${online}/${workers.length} Online`;
+  }
+  if (hWorkersMeta) {
+    const totalDone = workers.reduce((s, w) => s + (w.processed || 0), 0);
+    hWorkersMeta.textContent = `Total tasks processed: ${totalDone.toLocaleString()}`;
+  }
 }
 
 // ─── CHART ─────────────────────────────────────────────────────────────
-let chartCtx, chartData;
 function drawChart() {
   const canvas = document.getElementById('throughputChart');
-  if(!canvas) return;
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.offsetWidth, H = canvas.offsetHeight;
   canvas.width = W; canvas.height = H;
 
   const data = state.throughputHistory;
-  const max = Math.max(...data, 1);
-  const pts = data.length;
+  const max  = Math.max(...data, 1);
+  const pts  = data.length;
   const padL = 8, padR = 8, padT = 8, padB = 24;
   const gW = W - padL - padR;
   const gH = H - padT - padB;
 
-  ctx.clearRect(0,0,W,H);
+  ctx.clearRect(0, 0, W, H);
 
-  // Grid lines
   ctx.strokeStyle = 'rgba(255,255,255,0.04)';
   ctx.lineWidth = 1;
-  for(let i=0;i<=4;i++) {
-    const y = padT + (gH/4)*i;
-    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (gH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
   }
 
-  // Area fill
-  const gradient = ctx.createLinearGradient(0, padT, 0, padT+gH);
-  gradient.addColorStop(0, 'rgba(245,166,35,0.3)');
-  gradient.addColorStop(1, 'rgba(245,166,35,0.0)');
+  const gradient = ctx.createLinearGradient(0, padT, 0, padT + gH);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.12)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0.0)');
 
   ctx.beginPath();
   ctx.moveTo(padL, padT + gH);
-  data.forEach((v,i) => {
-    const x = padL + (i/(pts-1))*gW;
-    const y = padT + gH - (v/max)*gH;
-    if(i===0) ctx.lineTo(x,y); else ctx.lineTo(x,y);
+  data.forEach((v, i) => {
+    const x = padL + (i / (pts - 1)) * gW;
+    const y = padT + gH - (v / max) * gH;
+    ctx.lineTo(x, y);
   });
-  ctx.lineTo(padL + gW, padT+gH);
+  ctx.lineTo(padL + gW, padT + gH);
   ctx.closePath();
   ctx.fillStyle = gradient;
   ctx.fill();
 
-  // Line
   ctx.beginPath();
-  ctx.strokeStyle = 'rgba(245,166,35,0.9)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 1.5;
   ctx.lineJoin = 'round';
-  data.forEach((v,i) => {
-    const x = padL + (i/(pts-1))*gW;
-    const y = padT + gH - (v/max)*gH;
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  data.forEach((v, i) => {
+    const x = padL + (i / (pts - 1)) * gW;
+    const y = padT + gH - (v / max) * gH;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
-  // X labels
   ctx.fillStyle = 'rgba(74,90,106,0.8)';
   ctx.font = '9px JetBrains Mono, monospace';
   ctx.textAlign = 'center';
-  ['-30m','-25m','-20m','-15m','-10m','-5m','now'].forEach((l,i) => {
-    const x = padL + (i/6)*gW;
-    ctx.fillText(l, x, H-6);
+  ['-30','','-20','','-10','','now'].forEach((l, i) => {
+    if (!l) return;
+    const x = padL + (i / 6) * gW;
+    ctx.fillText(l, x, H - 6);
   });
 }
 
 // ─── EVENTS ─────────────────────────────────────────────────────────────
 function addEvent(type, taskId, desc) {
-  const ev = {type, taskId, desc, ts: Date.now()};
+  const ev = { type, taskId, desc, ts: Date.now() };
   events.unshift(ev);
-  if(events.length > 100) events.pop();
+  if (events.length > 100) events.pop();
 
   const html = `
     <div class="event-item">
@@ -1558,194 +1662,116 @@ function addEvent(type, taskId, desc) {
       <div class="event-dot-col"><div class="event-dot ${type}"></div></div>
       <div class="event-content">
         <div class="event-type ${type}">${type}</div>
-        <div class="event-desc">${desc} — <span class="event-task-id">${taskId}</span></div>
+        <div class="event-desc">${desc} — <span class="event-task-id">${taskId.slice(0,14)}</span></div>
       </div>
     </div>
   `;
 
-  const streams = ['eventStreamOverview','eventStreamFull'];
-  streams.forEach(id => {
+  ['eventStreamOverview', 'eventStreamFull'].forEach(id => {
     const el = document.getElementById(id);
-    if(!el) return;
+    if (!el) return;
     el.insertAdjacentHTML('afterbegin', html);
-    // Trim
-    while(el.children.length > 50) el.removeChild(el.lastChild);
+    while (el.children.length > 50) el.removeChild(el.lastChild);
   });
-}
-
-// ─── SIMULATION ─────────────────────────────────────────────────────────
-function simulateTick() {
-  const r = Math.random();
-
-  if(r < 0.35) {
-    // New task created
-    const type = TASK_TYPES[Math.floor(Math.random()*TASK_TYPES.length)];
-    const taskId = uid();
-    const task = {id:taskId, type, status:'pending', retries:0, worker: WORKER_IDS[Math.floor(Math.random()*4)], created:Date.now(), updated:Date.now()};
-    tasks.unshift(task);
-    if(tasks.length > 60) tasks.pop();
-    state.queued = Math.max(0, state.queued+1);
-    addEvent('created', taskId, 'Task enqueued: '+type);
-
-    // After short delay, process it
-    setTimeout(() => processTask(taskId, task), 800+Math.random()*1200);
-  }
-
-  if(r > 0.6 && r < 0.8) {
-    // Random worker heartbeat update
-    const w = workers[Math.floor(Math.random()*workers.length)];
-    w.lastHeartbeat = Date.now();
-  }
-
-  // Update throughput
-  const tpm = Math.floor(Math.random()*25)+8;
-  state.throughputHistory.push(tpm);
-  state.throughputHistory.shift();
-
-  // Update worker activity
-  workers.forEach(w => {
-    if(Math.random() < 0.3) {
-      w.status = Math.random() < 0.7 ? 'active' : 'idle';
-      if(w.status === 'idle') w.currentTask = null;
-    }
-  });
-  state.activeWorkers = workers.filter(w=>w.status==='active').length;
-
-  renderAll();
-}
-
-function processTask(taskId, task) {
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status = 'processing';
-  t.updated = Date.now();
-  state.queued = Math.max(0, state.queued-1);
-  addEvent('processing', taskId, 'Worker picked up: '+t.type);
-
-  setTimeout(() => {
-    const failed = Math.random() < 0.08;
-    if(failed && t.retries < 2) {
-      t.retries++;
-      t.status = 'pending';
-      state.retried++;
-      addEvent('retried', taskId, 'Retry #'+t.retries+' scheduled: '+t.type);
-      setTimeout(() => processTask(taskId, t), 1000+t.retries*500);
-    } else if(failed && t.retries >= 2) {
-      t.status = 'failed';
-      t.updated = Date.now();
-      state.failed++;
-      addEvent('failed', taskId, 'Max retries exceeded: '+t.type);
-      if(Math.random() < 0.4) {
-        dlqTasks.unshift({id:taskId, type:t.type, retries:t.retries+1, created:Date.now(), reason:'Max retries exceeded'});
-        if(dlqTasks.length > 10) dlqTasks.pop();
-        addEvent('dlq', taskId, 'Moved to DLQ: '+t.type);
-      }
-    } else {
-      t.status = 'completed';
-      t.updated = Date.now();
-      state.processed++;
-      addEvent('completed', taskId, 'Task completed: '+t.type);
-    }
-  }, 600+Math.random()*1500);
 }
 
 // ─── ACTIONS ─────────────────────────────────────────────────────────────
 function setFilter(f, btn) {
   state.taskFilter = f;
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderTasks();
 }
 
 function filterTasks() { renderTasks(); }
 
-function requeueTask(id) {
-  const idx = dlqTasks.findIndex(t=>t.id===id);
-  if(idx === -1) return;
-  const t = dlqTasks.splice(idx,1)[0];
-  const newTask = {id:uid(), type:t.type, status:'pending', retries:0, worker: WORKER_IDS[0], created:Date.now(), updated:Date.now()};
-  tasks.unshift(newTask);
-  state.queued++;
-  addEvent('created', newTask.id, 'Requeued from DLQ: '+t.type);
-  renderDLQ();
-  renderQueueStats();
+async function requeueTask(id) {
+  try {
+    const r = await fetch(
+      `${API_BASE}/dlq/retry/${id}`,
+      {
+        method: "POST"
+      }
+    );
+
+    if (!r.ok) {
+      const err = await r.json();
+      alert(err.error || "Retry failed");
+      return;
+    }
+
+    addEvent(
+      "retried",
+      id,
+      "Task moved from DLQ back to queue"
+    );
+
+    await refreshAll();
+
+  } catch (e) {
+    alert("Retry failed: " + e.message);
+  }
 }
 
-function submitTask() {
-  const type = document.getElementById('taskType').value;
-  const priority = document.getElementById('taskPriority').value;
-  const retries = parseInt(document.getElementById('taskRetries').value)||3;
-  const taskId = uid();
+async function submitTask() {
+  const type    = document.getElementById('taskType').value;
+  const payload = document.getElementById('taskPayload').value || '{}';
 
-  const task = {id:taskId, type, status:'pending', retries:0, worker: WORKER_IDS[0], created:Date.now(), updated:Date.now()};
-  tasks.unshift(task);
-  state.queued++;
+  try {
+    JSON.parse(payload);
+  } catch(_) {
+    alert('Invalid JSON payload');
+    return;
+  }
 
-  document.getElementById('newTaskId').textContent = taskId;
-  const suc = document.getElementById('formSuccess');
-  suc.style.display = 'block';
-  setTimeout(()=>{ suc.style.display='none'; }, 4000);
+  try {
+    const r = await fetch(API_BASE + '/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, payload }),
+    });
 
-  addEvent('created', taskId, 'Task submitted via UI: '+type);
-  setTimeout(() => processTask(taskId, task), 1000);
-  renderAll();
+    if (!r.ok) {
+      const err = await r.json();
+      alert('Error: ' + (err.error || r.status));
+      return;
+    }
+
+    const task = await r.json();
+    document.getElementById('newTaskId').textContent = task.id || '—';
+    const suc = document.getElementById('formSuccess');
+    suc.style.display = 'block';
+    setTimeout(() => { suc.style.display = 'none'; }, 4000);
+
+    addEvent('created', task.id || 'new', 'Task submitted via UI: ' + type);
+    await refreshAll();
+  } catch(e) {
+    alert('Failed to connect to backend: ' + e.message);
+  }
 }
 
 function showPage(name) {
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
   event.currentTarget.classList.add('active');
-
-  if(name === 'overview') drawChart();
-  if(name === 'health') { renderHealth(); }
+  if (name === 'overview') drawChart();
+  if (name === 'health')   renderHealth();
 }
 
-// ─── LOAD TASKS FROM API ─────────────────────────
+// ─── BOOT ─────────────────────────────────────────────────────────────
+setSystemStatus('degraded'); // will flip to operational once WS connects
+connectWS();
 
-async function loadTasks() {
+// Initial data load
+refreshAll();
 
-    const response = await fetch("/tasks");
-
-    const data = await response.json();
-
-    tasks = data.map(task => ({
-        id: task.ID,
-        type: task.Type,
-        status: task.Status,
-        retries: task.Retries,
-        worker: "-",
-        created: new Date(task.CreatedAt).getTime(),
-        updated: new Date(task.UpdatedAt).getTime(),
-        payload: task.Payload
-    }));
-
-    renderTasks();
-}
-
-// ─── BOOT ──────────────────────────────
-
-loadWorkers();
-loadTasks();
-initStats();
-renderAll();
-// Seed some initial events
-const seedTypes = ['completed','completed','processing','retried','created','failed'];
-for(let i=0;i<8;i++) {
-  const t = TASK_TYPES[i%TASK_TYPES.length];
-  const eid = uid();
-  const type = seedTypes[i%seedTypes.length];
-  setTimeout(() => addEvent(type, eid, 'Task lifecycle: '+t), i*100);
-}
-
-// Simulation interval
-setInterval(simulateTick, 1800);
+// Poll every 3 seconds
+setInterval(refreshAll, 3000);
 setInterval(renderHeader, 1000);
-setInterval(loadTasks, 5000);
 
-// Handle resize for chart
 window.addEventListener('resize', () => {
-  if(document.getElementById('page-overview').classList.contains('active')) drawChart();
+  if (document.getElementById('page-overview').classList.contains('active')) drawChart();
 });
 </script>
 </body>

@@ -19,6 +19,11 @@ func RefreshWorkerStatus() {
 
 			db.DB.Model(&worker).
 				Update("status", "offline")
+
+		} else {
+
+			db.DB.Model(&worker).
+				Update("status", "active")
 		}
 	}
 }

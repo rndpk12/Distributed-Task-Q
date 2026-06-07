@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -14,9 +15,15 @@ var (
 
 func Connect() {
 
+	addr := os.Getenv("REDIS_ADDR")
+
+	if addr == "" {
+		addr = "localhost:6379"
+	}
+
 	RDB = redis.NewClient(
 		&redis.Options{
-			Addr: "localhost:6379",
+			Addr: addr,
 		},
 	)
 

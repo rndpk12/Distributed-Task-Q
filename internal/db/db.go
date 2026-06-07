@@ -2,6 +2,7 @@ package db
 
 import (
 	"log"
+	"os"
 
 	"github.com/rndpk/distributed-task-queue/internal/models"
 
@@ -13,7 +14,11 @@ var DB *gorm.DB
 
 func Connect() {
 
-	dsn := "host=localhost user=rndpk dbname=taskqueue sslmode=disable"
+	dsn := os.Getenv("DATABASE_URL")
+
+	if dsn == "" {
+		dsn = "host=localhost user=rndpk dbname=taskqueue sslmode=disable"
+	}
 
 	database, err := gorm.Open(
 		postgres.Open(dsn),
