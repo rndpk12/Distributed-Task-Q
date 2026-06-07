@@ -27,6 +27,9 @@ func main() {
 	r.GET("/ws", handlers.WebSocketHandler)
 	r.GET("/workers", handlers.GetWorkers)
 	r.StaticFile("/dashboard", "./web/dashboard.html")
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(302, "/dashboard")
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
