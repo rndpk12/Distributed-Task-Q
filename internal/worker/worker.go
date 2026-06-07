@@ -1,16 +1,17 @@
 package worker
 
 import (
+	"errors"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/rndpk/distributed-task-queue/internal/db"
 	"github.com/rndpk/distributed-task-queue/internal/metrics"
 	"github.com/rndpk/distributed-task-queue/internal/models"
 	"github.com/rndpk/distributed-task-queue/internal/queue"
-	"github.com/rndpk/distributed-task-queue/internal/ws"
 )
 
 func Start() {
@@ -18,6 +19,13 @@ func Start() {
 	workerID := uuid.New().String()[:8]
 
 	log.Printf("Worker %s started\n", workerID)
+
+	db.DB.Create(&models.Worker{
+		ID:             workerID,
+		Status:         "active",
+		TasksProcessed: 0,
+		LastSeen:       time.Now(),
+	})
 
 	for {
 
@@ -44,9 +52,15 @@ func Start() {
 		task.Status = "processing"
 		db.DB.Save(&task)
 
+		db.DB.Model(&models.Worker{}).
+			Where("id = ?", workerID).
+			Updates(map[string]interface{}{
+				"last_seen": time.Now(),
+			})
+
 		log.Printf("[%s] Processing task %s\n", workerID, task.ID)
-		ws.Broadcast(ws.Event{
-			Type:    "processing",
+		queue.PublishEvent(queue.Event{
+			Type:    "TASK_PROCESSING",
 			Message: task.ID,
 		})
 
@@ -57,8 +71,15 @@ func Start() {
 		case "email":
 			processErr = ProcessEmail(task)
 
+		case "fail":
+			log.Println("FAIL TASK HIT")
+			processErr = errors.New("intentional failure")
+
 		default:
-			log.Printf("unknown task type %s", task.Type)
+			log.Printf(
+				"unknown task type %s",
+				task.Type,
+			)
 		}
 
 		if processErr != nil {
@@ -110,8 +131,8 @@ func Start() {
 				workerID,
 				task.ID,
 			)
-			ws.Broadcast(ws.Event{
-				Type:    "failed",
+			queue.PublishEvent(queue.Event{
+				Type:    "TASK_FAILED",
 				Message: task.ID,
 			})
 
@@ -153,9 +174,16 @@ func Start() {
 		task.Status = "completed"
 		db.DB.Save(&task)
 
+		db.DB.Model(&models.Worker{}).
+			Where("id = ?", workerID).
+			Update(
+				"tasks_processed",
+				gorm.Expr("tasks_processed + ?", 1),
+			)
+
 		log.Printf("[%s] Completed task %s\n", workerID, task.ID)
-		ws.Broadcast(ws.Event{
-			Type:    "completed",
+		queue.PublishEvent(queue.Event{
+			Type:    "TASK_COMPLETED",
 			Message: task.ID,
 		})
 	}

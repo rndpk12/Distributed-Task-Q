@@ -9,13 +9,12 @@ import (
 	"github.com/rndpk/distributed-task-queue/internal/models"
 )
 
-func GetDLQ(c *gin.Context) {
+func GetTasks(c *gin.Context) {
 
 	var tasks []models.Task
 
 	if err := db.DB.
-		Where("status = ?", "failed").
-		Order("updated_at desc").
+		Order("created_at desc").
 		Find(&tasks).Error; err != nil {
 
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -25,5 +24,8 @@ func GetDLQ(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, tasks)
+	c.JSON(
+		http.StatusOK,
+		tasks,
+	)
 }

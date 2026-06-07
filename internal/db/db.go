@@ -26,6 +26,7 @@ func Connect() {
 
 	err = database.AutoMigrate(
 		&models.Task{},
+		&models.Worker{},
 	)
 
 	if err != nil {

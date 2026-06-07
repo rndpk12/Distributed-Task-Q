@@ -9,6 +9,7 @@ import (
 	"github.com/rndpk/distributed-task-queue/internal/db"
 	"github.com/rndpk/distributed-task-queue/internal/models"
 	"github.com/rndpk/distributed-task-queue/internal/queue"
+	"github.com/rndpk/distributed-task-queue/internal/ws"
 )
 
 type CreateTaskRequest struct {
@@ -43,6 +44,11 @@ func CreateTask(c *gin.Context) {
 		"tasks",
 		task.ID,
 	)
+
+	ws.Broadcast(ws.Event{
+		Type:    "TASK_CREATED",
+		Message: task.ID,
+	})
 
 	c.JSON(
 		http.StatusCreated,

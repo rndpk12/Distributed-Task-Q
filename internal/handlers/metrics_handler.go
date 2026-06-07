@@ -24,9 +24,16 @@ func GetMetrics(c *gin.Context) {
 		"metrics:retried",
 	).Result()
 
+	queueDepth, _ := queue.RDB.LLen(
+		queue.Ctx,
+		"tasks",
+	).Result()
+
 	c.JSON(http.StatusOK, gin.H{
 		"processed": processed,
 		"failed":    failed,
 		"retried":   retried,
+		"queue":     queueDepth,
 	})
+
 }

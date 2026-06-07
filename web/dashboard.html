@@ -1,43 +1,1752 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Distributed Task Queue Dashboard</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskFlow — Distributed Queue Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg0: #080b0f;
+  --bg1: #0d1117;
+  --bg2: #111820;
+  --bg3: #161f2e;
+  --bg4: #1c2a3a;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --amber: #f5a623;
+  --amber-dim: rgba(245,166,35,0.12);
+  --amber-glow: rgba(245,166,35,0.25);
+  --green: #2dca72;
+  --green-dim: rgba(45,202,114,0.12);
+  --red: #ff4d4d;
+  --red-dim: rgba(255,77,77,0.12);
+  --blue: #4d9eff;
+  --blue-dim: rgba(77,158,255,0.12);
+  --purple: #a78bfa;
+  --purple-dim: rgba(167,139,250,0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34,211,238,0.1);
+  --text1: #e8edf3;
+  --text2: #8899aa;
+  --text3: #4a5a6a;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg0);
+  color: var(--text1);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay */
+body::before {
+  content:'';
+  position:fixed;
+  inset:0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+  pointer-events:none;
+  z-index:9999;
+}
+
+/* ─── HEADER ─── */
+.header {
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border2);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--sans);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  color: var(--text1);
+  flex-shrink: 0;
+}
+
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  background: var(--amber);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.logo span { color: var(--amber); }
+
+.header-sep { width:1px; height:24px; background: var(--border2); }
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.status-pill.operational { background: var(--green-dim); color: var(--green); border: 1px solid rgba(45,202,114,0.2); }
+.status-pill.degraded { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+
+.dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+.dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.header-stats {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.hstat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hstat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; }
+.hstat-value { font-size: 13px; color: var(--text1); font-weight: 600; }
+
+.header-time {
+  font-size: 11px;
+  color: var(--text3);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* ─── LAYOUT ─── */
+.app {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: calc(100vh - 56px);
+}
+
+/* ─── SIDEBAR ─── */
+.sidebar {
+  background: var(--bg1);
+  border-right: 1px solid var(--border);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-section {
+  padding: 6px 16px 2px;
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 8px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 12px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.nav-item:hover { background: var(--bg2); color: var(--text1); }
+.nav-item.active {
+  background: var(--amber-dim);
+  color: var(--amber);
+  border-left-color: var(--amber);
+}
+
+.nav-icon { width: 16px; text-align: center; opacity: 0.7; }
+.nav-badge {
+  margin-left: auto;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.nav-badge.red { background: var(--red-dim); border-color: rgba(255,77,77,0.2); color: var(--red); }
+.nav-badge.amber { background: var(--amber-dim); border-color: rgba(245,166,35,0.2); color: var(--amber); }
+.nav-badge.green { background: var(--green-dim); border-color: rgba(45,202,114,0.2); color: var(--green); }
+
+.sidebar-bottom {
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.connection-info {
+  font-size: 10px;
+  color: var(--text3);
+  line-height: 1.8;
+}
+
+/* ─── MAIN ─── */
+.main {
+  background: var(--bg0);
+  overflow-y: auto;
+  max-height: calc(100vh - 56px);
+}
+
+.page { display: none; padding: 24px; }
+.page.active { display: block; }
+
+/* ─── SECTION TITLE ─── */
+.section-title {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text3);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ─── METRIC CARDS ─── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.metric-card {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.metric-card:hover { border-color: var(--border2); }
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 8px 8px 0 0;
+}
+
+.metric-card.processed::before { background: var(--green); }
+.metric-card.failed::before { background: var(--red); }
+.metric-card.retried::before { background: var(--amber); }
+.metric-card.queued::before { background: var(--blue); }
+.metric-card.workers::before { background: var(--purple); }
+
+.metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+
+.metric-value {
+  font-family: var(--sans);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.metric-card.processed .metric-value { color: var(--green); }
+.metric-card.failed .metric-value { color: var(--red); }
+.metric-card.retried .metric-value { color: var(--amber); }
+.metric-card.queued .metric-value { color: var(--blue); }
+.metric-card.workers .metric-value { color: var(--purple); }
+
+.metric-delta {
+  font-size: 10px;
+  color: var(--text3);
+}
+
+.metric-delta.up { color: var(--green); }
+.metric-delta.down { color: var(--red); }
+
+/* ─── TWO-COL LAYOUT ─── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.full-col { margin-bottom: 24px; }
+
+/* ─── PANEL ─── */
+.panel {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg2);
+}
+
+.panel-title {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text1);
+  letter-spacing: 0.3px;
+}
+
+.panel-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text3);
+}
+
+/* ─── WORKER TABLE ─── */
+.worker-table { width: 100%; border-collapse: collapse; }
+
+.worker-table th {
+  padding: 8px 16px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+}
+
+.worker-table td {
+  padding: 10px 16px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.worker-table tr:last-child td { border-bottom: none; }
+.worker-table tr:hover td { background: var(--bg2); }
+
+.worker-id {
+  font-weight: 600;
+  color: var(--cyan);
+  font-size: 11px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.active { background: var(--green-dim); color: var(--green); border: 1px solid rgba(45,202,114,0.2); }
+.status-badge.idle { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
+.status-badge.dead { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,77,77,0.2); }
+.status-badge.processing { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+
+/* ─── QUEUE STATS ─── */
+.queue-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); }
+
+.qstat {
+  background: var(--bg1);
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.qstat-num {
+  font-family: var(--sans);
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.qstat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+}
+
+.qstat-bar {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  margin-top: 8px;
+}
+
+/* ─── EVENT STREAM ─── */
+.event-stream {
+  height: 320px;
+  overflow-y: auto;
+  padding: 8px 0;
+  scroll-behavior: smooth;
+}
+
+.event-stream::-webkit-scrollbar { width: 4px; }
+.event-stream::-webkit-scrollbar-track { background: transparent; }
+.event-stream::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.event-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 16px;
+  animation: slideIn 0.2s ease-out;
+  transition: background 0.1s;
+}
+
+@keyframes slideIn {
+  from { opacity:0; transform: translateX(-8px); }
+  to { opacity:1; transform: translateX(0); }
+}
+
+.event-item:hover { background: var(--bg2); }
+
+.event-time {
+  font-size: 10px;
+  color: var(--text3);
+  white-space: nowrap;
+  padding-top: 1px;
+  min-width: 68px;
+}
+
+.event-dot-col { padding-top: 5px; }
+
+.event-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.event-dot.created { background: var(--blue); }
+.event-dot.processing { background: var(--amber); }
+.event-dot.completed { background: var(--green); }
+.event-dot.failed { background: var(--red); }
+.event-dot.retried { background: var(--purple); }
+.event-dot.dlq { background: var(--red); opacity: 0.6; }
+
+.event-content { flex: 1; }
+.event-type { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 1px; font-weight: 600; }
+
+.event-type.created { color: var(--blue); }
+.event-type.processing { color: var(--amber); }
+.event-type.completed { color: var(--green); }
+.event-type.failed { color: var(--red); }
+.event-type.retried { color: var(--purple); }
+.event-type.dlq { color: var(--red); opacity: 0.7; }
+
+.event-desc { font-size: 11px; color: var(--text2); }
+.event-task-id { color: var(--cyan); font-size: 10px; }
+
+/* ─── TASK TABLE ─── */
+.task-table { width: 100%; border-collapse: collapse; }
+
+.task-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.task-table td {
+  padding: 9px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.task-table tr:last-child td { border-bottom: none; }
+.task-table tr:hover td { background: var(--bg2); cursor: pointer; }
+
+.task-id { color: var(--cyan); font-size: 10px; }
+.task-type { color: var(--text1); font-weight: 500; }
+
+/* ─── SEARCH & FILTER BAR ─── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.search-box {
+  flex: 1;
+  background: var(--bg1);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text1);
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-box:focus { border-color: var(--amber); }
+.search-box::placeholder { color: var(--text3); }
+
+.filter-btn {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: var(--text2);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.filter-btn:hover, .filter-btn.active {
+  background: var(--amber-dim);
+  border-color: rgba(245,166,35,0.3);
+  color: var(--amber);
+}
+
+/* ─── THROUGHPUT CHART ─── */
+.chart-container {
+  height: 180px;
+  padding: 16px;
+  position: relative;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── HEALTH PANEL ─── */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+
+.health-item {
+  background: var(--bg1);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.health-name {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+}
+
+.health-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.health-meta { font-size: 10px; color: var(--text3); }
+
+/* ─── DLQ ─── */
+.dlq-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dlq-item:last-child { border-bottom: none; }
+.dlq-item:hover { background: var(--bg2); }
+
+.dlq-info { flex: 1; }
+.dlq-id { color: var(--cyan); font-size: 10px; margin-bottom: 2px; }
+.dlq-type { font-size: 12px; color: var(--text1); font-weight: 500; }
+.dlq-meta { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+.dlq-retries {
+  text-align: center;
+  padding: 0 16px;
+}
+
+.dlq-retry-count {
+  font-family: var(--sans);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.dlq-retry-label { font-size: 10px; color: var(--text3); }
+
+.btn-requeue {
+  background: var(--amber-dim);
+  border: 1px solid rgba(245,166,35,0.3);
+  border-radius: 6px;
+  padding: 6px 14px;
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 600;
+}
+
+.btn-requeue:hover {
+  background: var(--amber);
+  color: var(--bg0);
+}
+
+.btn-requeue:active { transform: scale(0.96); }
+
+/* ─── TASK FORM ─── */
+.task-form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-full { grid-column: 1 / -1; }
+
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+
+.form-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text3);
+}
+
+.form-input, .form-select, .form-textarea {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text1);
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px var(--amber-glow);
+}
+
+.form-select { cursor: pointer; }
+.form-textarea { resize: vertical; min-height: 80px; }
+
+.form-select option { background: var(--bg2); }
+
+.btn-submit {
+  background: var(--amber);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 24px;
+  color: var(--bg0);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: all 0.15s;
+  align-self: flex-start;
+}
+
+.btn-submit:hover { background: #f7bb4e; transform: translateY(-1px); }
+.btn-submit:active { transform: translateY(0) scale(0.98); }
+
+.form-success {
+  display: none;
+  background: var(--green-dim);
+  border: 1px solid rgba(45,202,114,0.2);
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: var(--green);
+  font-size: 12px;
+}
+
+/* ─── PROGRESS BAR ─── */
+.mini-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg3);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.mini-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* ─── SPARKLINE ─── */
+.sparkline { height: 32px; }
+
+/* ─── LIVE BADGE ─── */
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: auto;
+}
+
+/* ─── SCROLL ─── */
+.scrollable { overflow-x: auto; }
+.scrollable::-webkit-scrollbar { height: 4px; }
+.scrollable::-webkit-scrollbar-track { background: transparent; }
+.scrollable::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 900px) {
+  .metrics-grid { grid-template-columns: repeat(3, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+  .health-grid { grid-template-columns: repeat(2, 1fr); }
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+}
+</style>
 </head>
 <body>
 
-<h1>Distributed Task Queue Dashboard</h1>
+<!-- HEADER -->
+<header class="header">
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    Task<span>Flow</span>
+  </div>
 
-<div id="events"></div>
+  <div class="header-sep"></div>
+
+  <div id="systemStatusPill" class="status-pill operational">
+    <div class="dot green" id="statusDot"></div>
+    <span id="statusText">Operational</span>
+  </div>
+
+  <div class="header-sep"></div>
+
+  <div style="font-size:11px;color:var(--text3);">
+    Connected workers: <span id="hdrWorkers" style="color:var(--purple);font-weight:600;">4</span>
+  </div>
+
+  <div class="header-stats">
+    <div class="hstat">
+      <span class="hstat-label">Throughput</span>
+      <span class="hstat-value" id="hdrThroughput">—</span>
+    </div>
+    <div class="hstat">
+      <span class="hstat-label">Uptime</span>
+      <span class="hstat-value" id="hdrUptime">—</span>
+    </div>
+  </div>
+
+  <div class="header-time" id="headerTime">—</div>
+</header>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">Monitor</div>
+    <div class="nav-item active" onclick="showPage('overview')">
+      <span class="nav-icon">◈</span> Overview
+    </div>
+    <div class="nav-item" onclick="showPage('workers')">
+      <span class="nav-icon">⬡</span> Workers
+      <span class="nav-badge purple" id="navWorkerCount">4</span>
+    </div>
+    <div class="nav-item" onclick="showPage('events')">
+      <span class="nav-icon">◎</span> Event Stream
+      <span class="nav-badge green">LIVE</span>
+    </div>
+
+    <div class="sidebar-section">Tasks</div>
+    <div class="nav-item" onclick="showPage('tasks')">
+      <span class="nav-icon">▦</span> Task History
+      <span class="nav-badge" id="navTaskCount">—</span>
+    </div>
+    <div class="nav-item" onclick="showPage('dlq')">
+      <span class="nav-icon">⚠</span> Dead Letter Queue
+      <span class="nav-badge red" id="navDLQCount">—</span>
+    </div>
+    <div class="nav-item" onclick="showPage('create')">
+      <span class="nav-icon">✦</span> Create Task
+    </div>
+
+    <div class="sidebar-section">System</div>
+    <div class="nav-item" onclick="showPage('health')">
+      <span class="nav-icon">❋</span> System Health
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="connection-info">
+        <div style="color:var(--text2);margin-bottom:4px;font-size:11px;">Connection</div>
+        <div>WS: <span style="color:var(--green);">ws://localhost:8080</span></div>
+        <div>Redis: <span style="color:var(--green);">:6379</span></div>
+        <div>PG: <span style="color:var(--green);">:5432</span></div>
+        <div style="margin-top:6px;">v1.0.0 · Go 1.22</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ══════════ OVERVIEW PAGE ══════════ -->
+    <div class="page active" id="page-overview">
+
+      <!-- Metric cards -->
+      <div class="metrics-grid">
+        <div class="metric-card processed">
+          <div class="metric-label">Processed</div>
+          <div class="metric-value" id="metProcessed">0</div>
+          <div class="metric-delta up" id="metProcessedDelta">+0 / min</div>
+        </div>
+        <div class="metric-card failed">
+          <div class="metric-label">Failed</div>
+          <div class="metric-value" id="metFailed">0</div>
+          <div class="metric-delta" id="metFailedDelta">0% rate</div>
+        </div>
+        <div class="metric-card retried">
+          <div class="metric-label">Retried</div>
+          <div class="metric-value" id="metRetried">0</div>
+          <div class="metric-delta">avg 1.3 attempts</div>
+        </div>
+        <div class="metric-card queued">
+          <div class="metric-label">Queue Depth</div>
+          <div class="metric-value" id="metQueued">0</div>
+          <div class="metric-delta" id="metQueuedTrend">—</div>
+        </div>
+        <div class="metric-card workers">
+          <div class="metric-label">Active Workers</div>
+          <div class="metric-value" id="metWorkers">0</div>
+          <div class="metric-delta">of 6 total</div>
+        </div>
+      </div>
+
+      <!-- Throughput Chart + Queue Stats -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--amber);">▶</span>
+            <span class="panel-title">Throughput — tasks/min</span>
+            <span class="live-badge"><div class="dot green"></div>Live</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="throughputChart" class="chart-canvas"></canvas>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--blue);">◈</span>
+            <span class="panel-title">Queue Breakdown</span>
+          </div>
+          <div class="queue-stats" id="queueStats">
+            <div class="qstat">
+              <div class="qstat-num" style="color:var(--blue);" id="qPending">0</div>
+              <div class="qstat-label">Pending</div>
+              <div class="qstat-bar mini-bar"><div class="mini-bar-fill" id="qPendingBar" style="background:var(--blue);width:0%"></div></div>
+            </div>
+            <div class="qstat">
+              <div class="qstat-num" style="color:var(--amber);" id="qProcessing">0</div>
+              <div class="qstat-label">Processing</div>
+              <div class="qstat-bar mini-bar"><div class="mini-bar-fill" id="qProcessingBar" style="background:var(--amber);width:0%"></div></div>
+            </div>
+            <div class="qstat">
+              <div class="qstat-num" style="color:var(--green);" id="qCompleted">0</div>
+              <div class="qstat-label">Completed</div>
+              <div class="qstat-bar mini-bar"><div class="mini-bar-fill" id="qCompletedBar" style="background:var(--green);width:0%"></div></div>
+            </div>
+            <div class="qstat">
+              <div class="qstat-num" style="color:var(--red);" id="qFailed">0</div>
+              <div class="qstat-label">Failed</div>
+              <div class="qstat-bar mini-bar"><div class="mini-bar-fill" id="qFailedBar" style="background:var(--red);width:0%"></div></div>
+            </div>
+            <div class="qstat">
+              <div class="qstat-num" style="color:var(--text3);" id="qDLQ">0</div>
+              <div class="qstat-label">Dead Letter</div>
+              <div class="qstat-bar mini-bar"><div class="mini-bar-fill" id="qDLQBar" style="background:var(--text3);width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Workers (mini) + Event Stream -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--purple);">⬡</span>
+            <span class="panel-title">Worker Activity</span>
+            <span class="panel-badge" id="workerPanelBadge">4 nodes</span>
+          </div>
+          <div class="scrollable">
+            <table class="worker-table" id="workerTableOverview">
+              <thead>
+                <tr>
+                  <th>Worker ID</th>
+                  <th>Status</th>
+                  <th>Tasks</th>
+                  <th>Heartbeat</th>
+                </tr>
+              </thead>
+              <tbody id="workerTableBody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--green);">◎</span>
+            <span class="panel-title">Live Event Stream</span>
+            <span class="live-badge"><div class="dot green"></div>Streaming</span>
+          </div>
+          <div class="event-stream" id="eventStreamOverview"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════ WORKERS PAGE ══════════ -->
+    <div class="page" id="page-workers">
+      <div class="section-title">Worker Nodes</div>
+      <div class="panel full-col">
+        <div class="panel-header">
+          <span style="color:var(--purple);">⬡</span>
+          <span class="panel-title">All Workers</span>
+          <span class="panel-badge" id="allWorkerCount">—</span>
+        </div>
+        <div class="scrollable">
+          <table class="worker-table" id="allWorkerTable">
+            <thead>
+              <tr>
+                <th>Worker ID</th>
+                <th>Status</th>
+                <th>Current Task</th>
+                <th>Processed</th>
+                <th>Success Rate</th>
+                <th>Last Heartbeat</th>
+              </tr>
+            </thead>
+            <tbody id="allWorkerTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ EVENTS PAGE ══════════ -->
+    <div class="page" id="page-events">
+      <div class="section-title">Live Event Stream</div>
+      <div class="panel full-col">
+        <div class="panel-header">
+          <span style="color:var(--green);">◎</span>
+          <span class="panel-title">Task lifecycle events</span>
+          <span class="live-badge" style="margin-left:auto"><div class="dot green"></div>Real-time</span>
+        </div>
+        <div class="event-stream" style="height:520px;" id="eventStreamFull"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ TASKS PAGE ══════════ -->
+    <div class="page" id="page-tasks">
+      <div class="section-title">Task History</div>
+      <div class="panel full-col">
+        <div class="toolbar">
+          <input type="text" class="search-box" placeholder="Search by task ID, type, payload..." id="taskSearch" oninput="filterTasks()">
+          <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+          <button class="filter-btn" onclick="setFilter('pending',this)">Pending</button>
+          <button class="filter-btn" onclick="setFilter('processing',this)">Processing</button>
+          <button class="filter-btn" onclick="setFilter('completed',this)">Completed</button>
+          <button class="filter-btn" onclick="setFilter('failed',this)">Failed</button>
+        </div>
+        <div class="scrollable">
+          <table class="task-table">
+            <thead>
+              <tr>
+                <th>Task ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Worker</th>
+                <th>Created</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="taskTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ DLQ PAGE ══════════ -->
+    <div class="page" id="page-dlq">
+      <div class="section-title">Dead Letter Queue</div>
+      <div class="panel full-col">
+        <div class="panel-header">
+          <span style="color:var(--red);">⚠</span>
+          <span class="panel-title">Failed tasks — permanent failures</span>
+          <span class="panel-badge" id="dlqCount">—</span>
+        </div>
+        <div id="dlqList"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ CREATE TASK PAGE ══════════ -->
+    <div class="page" id="page-create">
+      <div class="section-title">Create Task</div>
+      <div class="panel full-col" style="max-width:640px;">
+        <div class="panel-header">
+          <span style="color:var(--amber);">✦</span>
+          <span class="panel-title">Enqueue a new task</span>
+        </div>
+        <div class="task-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Task Type</label>
+              <select class="form-select" id="taskType">
+                <option value="email.send">email.send</option>
+                <option value="image.resize">image.resize</option>
+                <option value="pdf.generate">pdf.generate</option>
+                <option value="data.sync">data.sync</option>
+                <option value="notification.push">notification.push</option>
+                <option value="report.generate">report.generate</option>
+                <option value="webhook.deliver">webhook.deliver</option>
+                <option value="custom">custom</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Priority</label>
+              <select class="form-select" id="taskPriority">
+                <option value="low">Low</option>
+                <option value="normal" selected>Normal</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Max Retries</label>
+              <input type="number" class="form-input" id="taskRetries" value="3" min="0" max="10">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Timeout (seconds)</label>
+              <input type="number" class="form-input" id="taskTimeout" value="30" min="1" max="3600">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Idempotency Key (optional)</label>
+            <input type="text" class="form-input" id="taskIdempotency" placeholder="e.g. order-1234-email">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Payload (JSON)</label>
+            <textarea class="form-textarea" id="taskPayload" placeholder='{"user_id": 42, "email": "user@example.com"}'></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Feature Flag</label>
+            <select class="form-select" id="taskFlag">
+              <option value="">None</option>
+              <option value="new_email_provider">new_email_provider</option>
+              <option value="beta_image_processing">beta_image_processing</option>
+              <option value="v2_report_engine">v2_report_engine</option>
+            </select>
+          </div>
+          <div id="formSuccess" class="form-success">
+            ✓ Task enqueued successfully! Task ID: <span id="newTaskId" style="color:var(--cyan)"></span>
+          </div>
+          <button class="btn-submit" onclick="submitTask()">⚡ Enqueue Task</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ HEALTH PAGE ══════════ -->
+    <div class="page" id="page-health">
+      <div class="section-title">System Health</div>
+
+      <div class="panel full-col" style="margin-bottom:16px;">
+        <div class="panel-header">
+          <span style="color:var(--green);">❋</span>
+          <span class="panel-title">Service Status</span>
+        </div>
+        <div class="health-grid">
+          <div class="health-item">
+            <div class="health-name">PostgreSQL</div>
+            <div class="health-status" id="hPostgres">
+              <div class="dot green"></div> Healthy
+            </div>
+            <div class="health-meta" id="hPostgresMeta">Latency: 2.1ms · Connections: 8/20</div>
+          </div>
+          <div class="health-item">
+            <div class="health-name">Redis</div>
+            <div class="health-status" id="hRedis">
+              <div class="dot green"></div> Healthy
+            </div>
+            <div class="health-meta" id="hRedisMeta">Latency: 0.4ms · Memory: 12.3MB</div>
+          </div>
+          <div class="health-item">
+            <div class="health-name">WebSocket Hub</div>
+            <div class="health-status" id="hWS">
+              <div class="dot green"></div> Connected
+            </div>
+            <div class="health-meta" id="hWSMeta">Clients: 3 · Messages/s: 42</div>
+          </div>
+          <div class="health-item">
+            <div class="health-name">Worker Nodes</div>
+            <div class="health-status" id="hWorkers">
+              <div class="dot green"></div> 4/4 Online
+            </div>
+            <div class="health-meta" id="hWorkersMeta">Goroutines: 128 · GC: 1.2ms</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--blue);">▶</span>
+            <span class="panel-title">Queue Metrics</span>
+          </div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:12px;" id="healthQueueMetrics"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span style="color:var(--purple);">▶</span>
+            <span class="panel-title">Worker Load</span>
+          </div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:12px;" id="healthWorkerLoad"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
 
 <script>
-
-const eventsDiv = document.getElementById("events");
-
-const socket = new WebSocket(
-    "ws://localhost:8081/ws"
-);
-
-socket.onopen = () => {
-    console.log("Connected");
+// ─── STATE ───────────────────────────────────────────────────────────
+const state = {
+  processed: 0,
+  failed: 0,
+  retried: 0,
+  queued: 0,
+  activeWorkers: 0,
+  startTime: Date.now(),
+  taskFilter: 'all',
+  throughputHistory: Array(30).fill(0),
+  tasksPrevMin: 0,
+  lastMinProcessed: 0,
 };
 
-socket.onmessage = (event) => {
-
-    const data = JSON.parse(event.data);
-
-    const div = document.createElement("div");
-
-    div.innerHTML =
-        `<strong>${data.type}</strong> : ${data.message}`;
-
-    eventsDiv.prepend(div);
+const TASK_TYPES = ['email.send','image.resize','pdf.generate','data.sync','notification.push','report.generate','webhook.deliver'];
+const WORKER_IDS = ['worker-a1b2','worker-c3d4','worker-e5f6','worker-g7h8','worker-i9j0','worker-k1l2'];
+const STATUS_COLORS = {
+  pending: 'var(--blue)', processing: 'var(--amber)',
+  completed: 'var(--green)', failed: 'var(--red)',
+  retried: 'var(--purple)', dlq: 'var(--red)'
 };
 
-socket.onerror = (err) => {
-    console.log(err);
-};
+// Tasks DB
+let tasks = [];
+let dlqTasks = [];
+let workers = [];
+let events = [];
 
+function uid() {
+  return 'task-' + Math.random().toString(36).slice(2,10);
+}
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now()-ts)/1000);
+  if(s<5) return 'just now';
+  if(s<60) return s+'s ago';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  return Math.floor(s/3600)+'h ago';
+}
+
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString('en-US',{hour12:false});
+}
+
+function fmtDateTime(ts) {
+  return new Date(ts).toLocaleString('en-US',{hour12:false,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────
+async function loadWorkers() {
+
+    const response = await fetch("/workers");
+
+    const data = await response.json();
+
+    workers = data.map(worker => ({
+        id: worker.ID,
+        status: worker.Status,
+        processed: worker.TasksProcessed,
+        lastSeen: new Date(worker.LastSeen).getTime()
+    }));
+
+    renderWorkers();
+}
+
+function initTasks() {
+  const statuses = ['completed','completed','completed','failed','processing','pending'];
+  tasks = Array.from({length:25}, (_,i) => ({
+    id: uid(),
+    type: TASK_TYPES[i % TASK_TYPES.length],
+    status: statuses[i % statuses.length],
+    retries: Math.floor(Math.random()*3),
+    worker: WORKER_IDS[i % 4],
+    created: Date.now() - (25-i)*18000 - Math.random()*5000,
+    updated: Date.now() - Math.random()*3000,
+    payload: '{"data":"sample"}',
+  }));
+
+  dlqTasks = Array.from({length:4}, (_,i) => ({
+    id: uid(),
+    type: TASK_TYPES[i % TASK_TYPES.length],
+    retries: 3+i,
+    created: Date.now() - (4-i)*3600000,
+    reason: ['Connection timeout','Out of memory','Invalid payload','Rate limit exceeded'][i],
+  }));
+}
+
+function initStats() {
+  state.processed = Math.floor(Math.random()*800)+200;
+  state.failed = Math.floor(state.processed * 0.04);
+  state.retried = Math.floor(state.processed * 0.08);
+  state.queued = Math.floor(Math.random()*20)+5;
+  state.activeWorkers = 3;
+  state.throughputHistory = Array.from({length:30}, () => Math.floor(Math.random()*30)+5);
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────
+function renderAll() {
+  renderHeader();
+  renderMetrics();
+  renderWorkers();
+  renderQueueStats();
+  renderTasks();
+  renderDLQ();
+  renderHealth();
+  drawChart();
+}
+
+function renderHeader() {
+  document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-US',{hour12:false});
+  const upSecs = Math.floor((Date.now()-state.startTime)/1000);
+  const h = Math.floor(upSecs/3600), m = Math.floor((upSecs%3600)/60), s = upSecs%60;
+  document.getElementById('hdrUptime').textContent = `${h}h ${m}m ${s}s`;
+  document.getElementById('hdrWorkers').textContent = workers.filter(w=>w.status!=='dead').length;
+  const tpm = state.throughputHistory[state.throughputHistory.length-1];
+  document.getElementById('hdrThroughput').textContent = tpm+'/min';
+}
+
+function renderMetrics() {
+  document.getElementById('metProcessed').textContent = state.processed.toLocaleString();
+  document.getElementById('metFailed').textContent = state.failed.toLocaleString();
+  document.getElementById('metRetried').textContent = state.retried.toLocaleString();
+  document.getElementById('metQueued').textContent = state.queued.toLocaleString();
+  document.getElementById('metWorkers').textContent = state.activeWorkers;
+  const rate = state.processed > 0 ? ((state.failed/state.processed)*100).toFixed(1) : '0.0';
+  document.getElementById('metFailedDelta').textContent = rate+'% rate';
+  document.getElementById('metFailedDelta').className = 'metric-delta '+(parseFloat(rate)>5?'down':'');
+  const tpm = state.throughputHistory[state.throughputHistory.length-1];
+  document.getElementById('metProcessedDelta').textContent = '+'+tpm+' / min';
+}
+
+function renderWorkers() {
+
+  const tbody = document.getElementById('workerTableBody');
+
+  tbody.innerHTML = workers.map(w => `
+    <tr>
+      <td>
+        <span class="worker-id">${w.id}</span>
+      </td>
+
+      <td>
+        <span class="status-badge ${w.status}">
+          ${w.status === 'active'
+            ? '<span class="dot green" style="width:5px;height:5px;flex-shrink:0;display:inline-block;border-radius:50%;background:var(--green);margin-right:2px;"></span>'
+            : ''
+          }
+          ${w.status}
+        </span>
+      </td>
+
+      <td style="color:var(--text3);font-size:10px;">
+        —
+      </td>
+
+      <td style="font-weight:600;">
+        ${w.processed.toLocaleString()}
+      </td>
+    </tr>
+  `).join('');
+
+  const allTbody = document.getElementById('allWorkerTableBody');
+
+  if (allTbody) {
+
+    allTbody.innerHTML = workers.map(w => `
+      <tr>
+
+        <td>
+          <span class="worker-id">${w.id}</span>
+        </td>
+
+        <td>
+          <span class="status-badge ${w.status}">
+            ${w.status}
+          </span>
+        </td>
+
+        <td style="color:var(--text3);font-size:10px;">
+          —
+        </td>
+
+        <td style="font-weight:600;">
+          ${w.processed.toLocaleString()}
+        </td>
+
+        <td style="color:var(--green);">
+          Active
+        </td>
+
+        <td style="color:var(--text3);">
+          ${timeAgo(w.lastSeen)}
+        </td>
+
+      </tr>
+    `).join('');
+  }
+
+  const c = workers.filter(w => w.status !== 'dead').length;
+
+  document.getElementById('allWorkerCount').textContent =
+    c + ' workers';
+
+  document.getElementById('navWorkerCount').textContent =
+    c;
+
+  document.getElementById('workerPanelBadge').textContent =
+    c + ' nodes';
+
+  document.getElementById('hdrWorkers').textContent =
+    c;
+}
+
+function renderTasks() {
+  const q = document.getElementById('taskSearch').value.toLowerCase();
+  const filtered = tasks.filter(t => {
+    if(state.taskFilter !== 'all' && t.status !== state.taskFilter) return false;
+    if(q && !t.id.includes(q) && !t.type.includes(q) && !t.status.includes(q)) return false;
+    return true;
+  });
+
+  document.getElementById('taskTableBody').innerHTML = filtered.map(t => `
+    <tr>
+      <td><span class="task-id">${t.id}</span></td>
+      <td><span class="task-type">${t.type}</span></td>
+      <td><span class="status-badge ${t.status}">${t.status}</span></td>
+      <td style="text-align:center;">${t.retries}</td>
+      <td style="color:var(--cyan);font-size:10px;">${t.worker}</td>
+      <td style="color:var(--text3);">${fmtDateTime(t.created)}</td>
+      <td style="color:var(--text3);">${timeAgo(t.updated)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderDLQ() {
+  document.getElementById('dlqList').innerHTML = dlqTasks.length === 0
+    ? '<div style="padding:40px;text-align:center;color:var(--text3);">No failed tasks in dead letter queue</div>'
+    : dlqTasks.map(t => `
+      <div class="dlq-item">
+        <div class="dlq-info">
+          <div class="dlq-id">${t.id}</div>
+          <div class="dlq-type">${t.type}</div>
+          <div class="dlq-meta">Reason: ${t.reason} · Added ${timeAgo(t.created)}</div>
+        </div>
+        <div class="dlq-retries">
+          <div class="dlq-retry-count">${t.retries}</div>
+          <div class="dlq-retry-label">retries</div>
+        </div>
+        <button class="btn-requeue" onclick="requeueTask('${t.id}')">↺ Requeue</button>
+      </div>
+    `).join('');
+}
+
+function renderHealth() {
+  const qm = document.getElementById('healthQueueMetrics');
+  const wl = document.getElementById('healthWorkerLoad');
+  if(!qm || !wl) return;
+
+  const qmetrics = [
+    {label:'Enqueue rate', value:state.throughputHistory[state.throughputHistory.length-1]+'/min', pct:60},
+    {label:'Queue depth', value:state.queued, pct: Math.min(100,state.queued/50*100)},
+    {label:'Avg wait time', value:'1.2s', pct:12},
+    {label:'DLQ fill', value:dlqTasks.length+'/100', pct:dlqTasks.length},
+  ];
+
+  qm.innerHTML = qmetrics.map(m => `
+    <div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:11px;color:var(--text2);">${m.label}</span>
+        <span style="font-size:11px;color:var(--text1);font-weight:600;">${m.value}</span>
+      </div>
+      <div class="mini-bar"><div class="mini-bar-fill" style="background:var(--blue);width:${m.pct}%"></div></div>
+    </div>
+  `).join('');
+
+  wl.innerHTML = workers.map(w => `
+    <div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:11px;color:var(--cyan);">${w.id}</span>
+        <span class="status-badge ${w.status}" style="font-size:9px;padding:1px 6px;">${w.status}</span>
+      </div>
+      <div class="mini-bar"><div class="mini-bar-fill" style="background:var(--purple);width:${w.status==='active'?Math.floor(Math.random()*40)+40:5}%"></div></div>
+    </div>
+  `).join('');
+}
+
+// ─── CHART ─────────────────────────────────────────────────────────────
+let chartCtx, chartData;
+function drawChart() {
+  const canvas = document.getElementById('throughputChart');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  canvas.width = W; canvas.height = H;
+
+  const data = state.throughputHistory;
+  const max = Math.max(...data, 1);
+  const pts = data.length;
+  const padL = 8, padR = 8, padT = 8, padB = 24;
+  const gW = W - padL - padR;
+  const gH = H - padT - padB;
+
+  ctx.clearRect(0,0,W,H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=4;i++) {
+    const y = padT + (gH/4)*i;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+  }
+
+  // Area fill
+  const gradient = ctx.createLinearGradient(0, padT, 0, padT+gH);
+  gradient.addColorStop(0, 'rgba(245,166,35,0.3)');
+  gradient.addColorStop(1, 'rgba(245,166,35,0.0)');
+
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + gH);
+  data.forEach((v,i) => {
+    const x = padL + (i/(pts-1))*gW;
+    const y = padT + gH - (v/max)*gH;
+    if(i===0) ctx.lineTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.lineTo(padL + gW, padT+gH);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(245,166,35,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  data.forEach((v,i) => {
+    const x = padL + (i/(pts-1))*gW;
+    const y = padT + gH - (v/max)*gH;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // X labels
+  ctx.fillStyle = 'rgba(74,90,106,0.8)';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ['-30m','-25m','-20m','-15m','-10m','-5m','now'].forEach((l,i) => {
+    const x = padL + (i/6)*gW;
+    ctx.fillText(l, x, H-6);
+  });
+}
+
+// ─── EVENTS ─────────────────────────────────────────────────────────────
+function addEvent(type, taskId, desc) {
+  const ev = {type, taskId, desc, ts: Date.now()};
+  events.unshift(ev);
+  if(events.length > 100) events.pop();
+
+  const html = `
+    <div class="event-item">
+      <span class="event-time">${fmtTime(ev.ts)}</span>
+      <div class="event-dot-col"><div class="event-dot ${type}"></div></div>
+      <div class="event-content">
+        <div class="event-type ${type}">${type}</div>
+        <div class="event-desc">${desc} — <span class="event-task-id">${taskId}</span></div>
+      </div>
+    </div>
+  `;
+
+  const streams = ['eventStreamOverview','eventStreamFull'];
+  streams.forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.insertAdjacentHTML('afterbegin', html);
+    // Trim
+    while(el.children.length > 50) el.removeChild(el.lastChild);
+  });
+}
+
+// ─── SIMULATION ─────────────────────────────────────────────────────────
+function simulateTick() {
+  const r = Math.random();
+
+  if(r < 0.35) {
+    // New task created
+    const type = TASK_TYPES[Math.floor(Math.random()*TASK_TYPES.length)];
+    const taskId = uid();
+    const task = {id:taskId, type, status:'pending', retries:0, worker: WORKER_IDS[Math.floor(Math.random()*4)], created:Date.now(), updated:Date.now()};
+    tasks.unshift(task);
+    if(tasks.length > 60) tasks.pop();
+    state.queued = Math.max(0, state.queued+1);
+    addEvent('created', taskId, 'Task enqueued: '+type);
+
+    // After short delay, process it
+    setTimeout(() => processTask(taskId, task), 800+Math.random()*1200);
+  }
+
+  if(r > 0.6 && r < 0.8) {
+    // Random worker heartbeat update
+    const w = workers[Math.floor(Math.random()*workers.length)];
+    w.lastHeartbeat = Date.now();
+  }
+
+  // Update throughput
+  const tpm = Math.floor(Math.random()*25)+8;
+  state.throughputHistory.push(tpm);
+  state.throughputHistory.shift();
+
+  // Update worker activity
+  workers.forEach(w => {
+    if(Math.random() < 0.3) {
+      w.status = Math.random() < 0.7 ? 'active' : 'idle';
+      if(w.status === 'idle') w.currentTask = null;
+    }
+  });
+  state.activeWorkers = workers.filter(w=>w.status==='active').length;
+
+  renderAll();
+}
+
+function processTask(taskId, task) {
+  const t = tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  t.status = 'processing';
+  t.updated = Date.now();
+  state.queued = Math.max(0, state.queued-1);
+  addEvent('processing', taskId, 'Worker picked up: '+t.type);
+
+  setTimeout(() => {
+    const failed = Math.random() < 0.08;
+    if(failed && t.retries < 2) {
+      t.retries++;
+      t.status = 'pending';
+      state.retried++;
+      addEvent('retried', taskId, 'Retry #'+t.retries+' scheduled: '+t.type);
+      setTimeout(() => processTask(taskId, t), 1000+t.retries*500);
+    } else if(failed && t.retries >= 2) {
+      t.status = 'failed';
+      t.updated = Date.now();
+      state.failed++;
+      addEvent('failed', taskId, 'Max retries exceeded: '+t.type);
+      if(Math.random() < 0.4) {
+        dlqTasks.unshift({id:taskId, type:t.type, retries:t.retries+1, created:Date.now(), reason:'Max retries exceeded'});
+        if(dlqTasks.length > 10) dlqTasks.pop();
+        addEvent('dlq', taskId, 'Moved to DLQ: '+t.type);
+      }
+    } else {
+      t.status = 'completed';
+      t.updated = Date.now();
+      state.processed++;
+      addEvent('completed', taskId, 'Task completed: '+t.type);
+    }
+  }, 600+Math.random()*1500);
+}
+
+// ─── ACTIONS ─────────────────────────────────────────────────────────────
+function setFilter(f, btn) {
+  state.taskFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTasks();
+}
+
+function filterTasks() { renderTasks(); }
+
+function requeueTask(id) {
+  const idx = dlqTasks.findIndex(t=>t.id===id);
+  if(idx === -1) return;
+  const t = dlqTasks.splice(idx,1)[0];
+  const newTask = {id:uid(), type:t.type, status:'pending', retries:0, worker: WORKER_IDS[0], created:Date.now(), updated:Date.now()};
+  tasks.unshift(newTask);
+  state.queued++;
+  addEvent('created', newTask.id, 'Requeued from DLQ: '+t.type);
+  renderDLQ();
+  renderQueueStats();
+}
+
+function submitTask() {
+  const type = document.getElementById('taskType').value;
+  const priority = document.getElementById('taskPriority').value;
+  const retries = parseInt(document.getElementById('taskRetries').value)||3;
+  const taskId = uid();
+
+  const task = {id:taskId, type, status:'pending', retries:0, worker: WORKER_IDS[0], created:Date.now(), updated:Date.now()};
+  tasks.unshift(task);
+  state.queued++;
+
+  document.getElementById('newTaskId').textContent = taskId;
+  const suc = document.getElementById('formSuccess');
+  suc.style.display = 'block';
+  setTimeout(()=>{ suc.style.display='none'; }, 4000);
+
+  addEvent('created', taskId, 'Task submitted via UI: '+type);
+  setTimeout(() => processTask(taskId, task), 1000);
+  renderAll();
+}
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  event.currentTarget.classList.add('active');
+
+  if(name === 'overview') drawChart();
+  if(name === 'health') { renderHealth(); }
+}
+
+// ─── LOAD TASKS FROM API ─────────────────────────
+
+async function loadTasks() {
+
+    const response = await fetch("/tasks");
+
+    const data = await response.json();
+
+    tasks = data.map(task => ({
+        id: task.ID,
+        type: task.Type,
+        status: task.Status,
+        retries: task.Retries,
+        worker: "-",
+        created: new Date(task.CreatedAt).getTime(),
+        updated: new Date(task.UpdatedAt).getTime(),
+        payload: task.Payload
+    }));
+
+    renderTasks();
+}
+
+// ─── BOOT ──────────────────────────────
+
+loadWorkers();
+loadTasks();
+initStats();
+renderAll();
+// Seed some initial events
+const seedTypes = ['completed','completed','processing','retried','created','failed'];
+for(let i=0;i<8;i++) {
+  const t = TASK_TYPES[i%TASK_TYPES.length];
+  const eid = uid();
+  const type = seedTypes[i%seedTypes.length];
+  setTimeout(() => addEvent(type, eid, 'Task lifecycle: '+t), i*100);
+}
+
+// Simulation interval
+setInterval(simulateTick, 1800);
+setInterval(renderHeader, 1000);
+setInterval(loadTasks, 5000);
+
+// Handle resize for chart
+window.addEventListener('resize', () => {
+  if(document.getElementById('page-overview').classList.contains('active')) drawChart();
+});
 </script>
-
 </body>
 </html>

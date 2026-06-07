@@ -6,6 +6,7 @@ import (
 	"github.com/rndpk/distributed-task-queue/internal/db"
 	"github.com/rndpk/distributed-task-queue/internal/handlers"
 	"github.com/rndpk/distributed-task-queue/internal/queue"
+	"github.com/rndpk/distributed-task-queue/internal/ws"
 )
 
 func main() {
@@ -13,11 +14,18 @@ func main() {
 	db.Connect()
 	queue.Connect()
 
+	ws.StartSubscriber()
+
 	r := gin.Default()
 
 	r.POST(
 		"/tasks",
 		handlers.CreateTask,
+	)
+
+	r.GET(
+		"/tasks",
+		handlers.GetTasks,
 	)
 
 	r.GET(
@@ -33,6 +41,11 @@ func main() {
 	r.GET(
 		"/ws",
 		handlers.WebSocketHandler,
+	)
+
+	r.GET(
+		"/workers",
+		handlers.GetWorkers,
 	)
 
 	r.StaticFile(
