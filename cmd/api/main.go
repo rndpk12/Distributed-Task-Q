@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/rndpk/distributed-task-queue/internal/db"
@@ -26,14 +28,10 @@ func main() {
 	r.GET("/workers", handlers.GetWorkers)
 	r.StaticFile("/dashboard", "./web/dashboard.html")
 
-	import "os"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8081"
+	}
 
-// ...
-
-port := os.Getenv("PORT")
-if port == "" {
-	port = "8081"
-}
-
-r.Run(":" + port)
+	r.Run(":" + port)
 }
