@@ -853,7 +853,10 @@ body::before {
     <div class="sidebar-bottom">
       <div class="connection-info">
         <div style="color:var(--text2);margin-bottom:4px;font-size:11px;">Connection</div>
-        <div>WS: <span style="color:var(--green);">ws://localhost:8081</span></div>
+        <div>
+  WS:
+  <span id="wsAddress" style="color:var(--green);"></span>
+</div>
         <div>Redis: <span style="color:var(--green);">:6379</span></div>
         <div>PG: <span style="color:var(--green);">:5432</span></div>
         <div style="margin-top:6px;">v1.0.0 · Go 1.22</div>
@@ -1197,9 +1200,10 @@ body::before {
 
 <script>
 // ─── CONFIG ──────────────────────────────────────────────────────────
-const API_BASE = 'http://localhost:8081';
-const WS_URL   = 'ws://localhost:8081/ws';
+const API_BASE = '';
 
+const WS_URL =
+  `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 // ─── STATE ───────────────────────────────────────────────────────────
 const state = {
   processed: 0,
