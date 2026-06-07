@@ -15,7 +15,7 @@ var (
 
 func Connect() {
 
-	addr := os.Getenv("REDIS_ADDR")
+	addr := os.Getenv("neocozy-mass-groomed-72035.db.redis.io:12997")
 
 	if addr == "" {
 		addr = "localhost:6379"
