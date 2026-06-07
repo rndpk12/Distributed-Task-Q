@@ -26,5 +26,14 @@ func main() {
 	r.GET("/workers", handlers.GetWorkers)
 	r.StaticFile("/dashboard", "./web/dashboard.html")
 
-	r.Run(":8081")
+	import "os"
+
+// ...
+
+port := os.Getenv("PORT")
+if port == "" {
+	port = "8081"
+}
+
+r.Run(":" + port)
 }
