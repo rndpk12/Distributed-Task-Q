@@ -21,11 +21,11 @@ func Connect() {
 		addr = "localhost:6379"
 	}
 
-	RDB = redis.NewClient(
-		&redis.Options{
-			Addr: addr,
-		},
-	)
+	RDB = redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Username: os.Getenv("default"),
+		Password: os.Getenv("sxdAvMNm3ioaomJ266rm1lPyHqEljGVA"),
+	})
 
 	_, err := RDB.Ping(Ctx).Result()
 
